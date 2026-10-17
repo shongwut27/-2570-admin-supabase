@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "UserPermission": {
+      "title": "User Permission",
+      "description": "User permission role for system access",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "role": {
+          "type": "string",
+          "description": "Access role",
+          "enum": ["view", "edit", "admin"]
+        },
+        "addedBy": {
+          "type": "string",
+          "description": "Email of admin who added or updated this permission"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "PermissionRequest": {
+      "title": "Permission Request",
+      "description": "Request submitted by user to obtain access role",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User avatar URL"
+        },
+        "requestedRole": {
+          "type": "string",
+          "description": "Role requested",
+          "enum": ["view", "edit"]
+        },
+        "status": {
+          "type": "string",
+          "description": "Approval status",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "requestedAt": {
+          "type": "string",
+          "description": "ISO timestamp of request"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of update"
+        }
+      },
+      "required": ["email", "requestedRole", "status"]
+    }
+  },
+  "firestore": {
+    "/user_permissions/{permissionId}": {
+      "schema": "UserPermission",
+      "description": "Collection of allowed user emails and their access roles"
+    },
+    "/permission_requests/{requestId}": {
+      "schema": "PermissionRequest",
+      "description": "Collection of user permission requests"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "supabass-ระบบธุรการส่วนการเงินและบัญชี (FA Central Admin System)",
+  "description": "ระบบธุรการส่วนการเงินและบัญชี (Document Tracking System) ที่ใช้ Google Sheets เป็นฐานข้อมูล สามารถลงทะเบียนเอกสารด้วยการสแกนหรือพิมพ์เลขบาร์โค้ด",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
