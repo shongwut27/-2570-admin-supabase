@@ -1650,7 +1650,8 @@ export default function App() {
   // 1) (1)ภาคินี, 2) (2)พรนัชชา, 3) (3)ดารารัตน์, 4) (4)สาโรจน์,
   // 5) (5)ละอองดาว, 6) (6)ธนัฏพร, 7) (7)อภิญญา, 8) (8)ทรงวุฒิ, 9) (9)ดุษฎา
   // คำนวณตำแหน่งโต๊ะถัดไปแบบ Dynamic อิงตามโต๊ะเปิดใช้งานจริงทั้งหมด (Active Desks): nextIndex = (currentIndex + 1) % activeDesks.length
-  const getNextTab1Desk = (): string => {
+  // โดยรันต่อจาก "ผู้ให้บริการ-final ที่รับล่าสุด" (รายการบนสุดของหน้า 1) เสมอ
+  const getNextTab1Desk = (currentBatchScans?: ScanItem[]): string => {
     const ALL_9_DESKS = [
       '(1)ภาคินี',
       '(2)พรนัชชา',
@@ -1670,8 +1671,67 @@ export default function App() {
       return ALL_9_DESKS[0];
     }
 
-    // ดึงค่าหมายเลขโต๊ะล่าสุด (1-9) จาก Ref / State lastAssignedIndex / localStorage / ข้อมูลล่าสุด
-    let currentNum = lastDeskNumRef.current;
+    // 1. ถ้าอยู่ระหว่างการสแกนหลายรายการในรอบเดียวกัน (Batch Scans): ใช้โต๊ะของรายการล่าสุดใน Batch
+    let latestDeskNum = 0;
+    if (currentBatchScans && currentBatchScans.length > 0) {
+      const lastInBatch = currentBatchScans[currentBatchScans.length - 1];
+      const deskName = lastInBatch.data?.finalDesk || lastInBatch.data?.overrideDesk || lastInBatch.data?.autoDesk;
+      latestDeskNum = extractDeskNum(deskName);
+      if (!latestDeskNum || latestDeskNum < 1 || latestDeskNum > 9) {
+        const foundIdx = PROVIDER_DESKS.findIndex(d => d === deskName || cleanNameForCompare(d) === cleanNameForCompare(deskName));
+        if (foundIdx !== -1) latestDeskNum = foundIdx + 1;
+      }
+    }
+
+    // 2. ถ้าไม่ได้อยู่ใน Batch: รันต่อจาก "ผู้ให้บริการ-final ที่รับล่าสุด" ของหน้างานใหม่ (รายการบนสุดใน displayedScannedItems)
+    if (latestDeskNum < 1 || latestDeskNum > 9) {
+      const topItem = (activeTab === 1 && displayedScannedItems.length > 0)
+        ? displayedScannedItems[0]
+        : scannedItems.filter(item => {
+            const curType = item.data?.type || item.data?.TYPE || '';
+            const noType = item.data?.noType || '';
+            return (curType === '1. ตรวจจ่าย-งานใหม่' || (!curType && item.tabId === 1)) && (noType || 'N') === 'N';
+          }).sort((a, b) => {
+            const timeA = a.createdAt || parseDateToTimestamp(a.data?.receiveDate) || 0;
+            const timeB = b.createdAt || parseDateToTimestamp(b.data?.receiveDate) || 0;
+            if (timeA !== timeB) return timeB - timeA;
+            return 0;
+          })[0];
+
+      if (topItem) {
+        const deskName = topItem.data?.finalDesk || topItem.data?.overrideDesk || topItem.data?.autoDesk;
+        latestDeskNum = extractDeskNum(deskName);
+        if (!latestDeskNum || latestDeskNum < 1 || latestDeskNum > 9) {
+          const foundIdx = PROVIDER_DESKS.findIndex(d => d === deskName || cleanNameForCompare(d) === cleanNameForCompare(deskName));
+          if (foundIdx !== -1) latestDeskNum = foundIdx + 1;
+        }
+      }
+    }
+
+    // 3. ถ้าใน scannedItems ยังไม่มี: ค้นหาจากรายการล่าสุดของหน้า 1 ใน allStatsRecords (Supabase)
+    if (latestDeskNum < 1 || latestDeskNum > 9) {
+      const tab1Stats = allStatsRecords.filter(item => {
+        const curType = item.data?.type || item.data?.TYPE || '';
+        const noType = item.data?.noType || '';
+        return (curType === '1. ตรวจจ่าย-งานใหม่' || (!curType && (item as any).tabId === 1)) && (noType || 'N') === 'N';
+      });
+
+      if (tab1Stats.length > 0) {
+        const latestStat = tab1Stats[0];
+        const deskName = latestStat.data?.finalDesk || latestStat.data?.overrideDesk || latestStat.data?.autoDesk;
+        latestDeskNum = extractDeskNum(deskName);
+        if (!latestDeskNum || latestDeskNum < 1 || latestDeskNum > 9) {
+          const foundIdx = PROVIDER_DESKS.findIndex(d => d === deskName || cleanNameForCompare(d) === cleanNameForCompare(deskName));
+          if (foundIdx !== -1) latestDeskNum = foundIdx + 1;
+        }
+      }
+    }
+
+    // 4. Fallback: ถ้ายังไม่มีประวัติใดๆ ในระบบ ให้ดูจาก Ref / State lastAssignedIndex / localStorage
+    let currentNum = latestDeskNum;
+    if (currentNum < 1 || currentNum > 9) {
+      currentNum = lastDeskNumRef.current;
+    }
     if (currentNum < 1 || currentNum > 9) {
       currentNum = lastAssignedIndex;
     }
@@ -1681,18 +1741,6 @@ export default function App() {
         const parsed = saved ? parseInt(saved, 10) : 0;
         if (parsed >= 1 && parsed <= 9) currentNum = parsed;
       } catch (e) {}
-    }
-
-    if (currentNum < 1 || currentNum > 9) {
-      // Fallback: ดูจากรายการล่าสุดของ Tab 1 ใน scannedItems
-      const recentTab1 = scannedItems.find(item =>
-        (item.data.type === '1. ตรวจจ่าย-งานใหม่' || item.data.TYPE === '1. ตรวจจ่าย-งานใหม่') &&
-        extractDeskNum(item.data.finalDesk || item.data.overrideDesk || item.data.autoDesk) > 0
-      );
-      if (recentTab1) {
-        const extracted = extractDeskNum(recentTab1.data.finalDesk || recentTab1.data.overrideDesk || recentTab1.data.autoDesk);
-        if (extracted >= 1 && extracted <= 9) currentNum = extracted;
-      }
     }
 
     // หา index ของโต๊ะล่าสุดใน activeDesks
@@ -1825,7 +1873,7 @@ export default function App() {
           const clData = clRes.found && clRes.data ? clRes.data : {};
 
           // 3. Round-Robin Desk Routing (1 -> 2 -> ... -> 9 -> 1, skip inactive desks)
-          const assignedAutoDesk = getNextTab1Desk();
+          const assignedAutoDesk = getNextTab1Desk(tab1Scans);
           const finalDesk = assignedAutoDesk;
           const deskPhone = getDeskPhone(finalDesk);
 
@@ -2542,18 +2590,21 @@ export default function App() {
       // Re-fetch to ensure fresh data
       await fetchReceivedData();
 
-      // Update next desk queue pointer if desk was changed manually (เฉพาะหน้างานใหม่)
+      // Update next desk queue pointer if desk was changed manually (เฉพาะหน้างานใหม่ และเฉพาะกรณีที่เป็นรายการล่าสุดบนสุด)
       if (updatedRecord.type === '1. ตรวจจ่าย-งานใหม่' || updatedRecord.TYPE === '1. ตรวจจ่าย-งานใหม่') {
-        const finalDeskName = updatedRecord.finalDesk || updatedRecord.overrideDesk || '';
-        let newDeskNum = extractDeskNum(finalDeskName);
-        if (!newDeskNum || newDeskNum < 1 || newDeskNum > 9) {
-          const foundIdx = PROVIDER_DESKS.findIndex(d => d === finalDeskName || cleanNameForCompare(d) === cleanNameForCompare(finalDeskName));
-          if (foundIdx !== -1) {
-            newDeskNum = foundIdx + 1;
+        const isLatestTab1 = displayedScannedItems.length > 0 && displayedScannedItems[0]?.id === cleanId;
+        if (isLatestTab1) {
+          const finalDeskName = updatedRecord.finalDesk || updatedRecord.overrideDesk || '';
+          let newDeskNum = extractDeskNum(finalDeskName);
+          if (!newDeskNum || newDeskNum < 1 || newDeskNum > 9) {
+            const foundIdx = PROVIDER_DESKS.findIndex(d => d === finalDeskName || cleanNameForCompare(d) === cleanNameForCompare(finalDeskName));
+            if (foundIdx !== -1) {
+              newDeskNum = foundIdx + 1;
+            }
           }
-        }
-        if (newDeskNum >= 1 && newDeskNum <= 9) {
-          updateLastDeskNum(newDeskNum);
+          if (newDeskNum >= 1 && newDeskNum <= 9) {
+            updateLastDeskNum(newDeskNum);
+          }
         }
       }
 
@@ -2672,11 +2723,14 @@ export default function App() {
           throw new Error(res.error || 'ไม่สามารถบันทึกข้อมูลลงฐานข้อมูลได้');
         }
 
-        // เฉพาะหน้า "1. ตรวจจ่าย-งานใหม่": อัปเดต Queue Pointer เมื่อมีการเปลี่ยนโต๊ะ
+        // เฉพาะหน้า "1. ตรวจจ่าย-งานใหม่": อัปเดต Queue Pointer เมื่อมีการเปลี่ยนโต๊ะเฉพาะกรณีที่เป็นรายการล่าสุดบนสุด
         if (finalRecord.type === '1. ตรวจจ่าย-งานใหม่' || finalRecord.TYPE === '1. ตรวจจ่าย-งานใหม่') {
-          const num = extractDeskNum(finalRecord.overrideDesk && finalRecord.overrideDesk !== 'ไม่เลือก' ? finalRecord.overrideDesk : finalRecord.finalDesk);
-          if (num >= 1 && num <= 9) {
-            updateLastDeskNum(num);
+          const isLatestTab1 = displayedScannedItems.length > 0 && displayedScannedItems[0]?.id === cleanId;
+          if (isLatestTab1) {
+            const num = extractDeskNum(finalRecord.overrideDesk && finalRecord.overrideDesk !== 'ไม่เลือก' ? finalRecord.overrideDesk : finalRecord.finalDesk);
+            if (num >= 1 && num <= 9) {
+              updateLastDeskNum(num);
+            }
           }
         } else if (finalRecord.type !== '2. ตรวจจ่าย-งานเก่า' && finalRecord.TYPE !== '2. ตรวจจ่าย-งานเก่า') {
           const num = extractDeskNum(finalRecord.overrideDesk && finalRecord.overrideDesk !== 'ไม่เลือก' ? finalRecord.overrideDesk : finalRecord.finalDesk);
@@ -4309,8 +4363,9 @@ export default function App() {
                                               const isOverride = newDesk !== initialDesk;
                                               const deskPhone = getDeskPhone(newDesk);
 
-                                              // เฉพาะหน้า 1: อัปเดต Queue Pointer และ State lastAssignedIndex เมื่อมีการเปลี่ยน Dropdown
-                                              if (activeTab === 1) {
+                                              // เฉพาะหน้า 1: อัปเดต Queue Pointer และ State lastAssignedIndex เมื่อมีการเปลี่ยน Dropdown เฉพาะรายการล่าสุดบนสุดเท่านั้น
+                                              const isLatestTab1Item = activeTab === 1 && displayedScannedItems.length > 0 && displayedScannedItems[0].id === item.id;
+                                              if (isLatestTab1Item) {
                                                 let newDeskNum = extractDeskNum(newDesk);
                                                 if (!newDeskNum || newDeskNum < 1 || newDeskNum > 9) {
                                                   const foundIdx = PROVIDER_DESKS.findIndex(d => d === newDesk || cleanNameForCompare(d) === cleanNameForCompare(newDesk));
@@ -4373,7 +4428,11 @@ export default function App() {
                                                 return r;
                                               }));
                                               if (activeTab === 1) {
-                                                showToast('success', `เปลี่ยนโต๊ะเป็น ${newDesk} (โทร. ${deskPhone || '-'}) และตั้งเป็นคิวเริ่มต้นสำหรับรอบถัดไปแล้ว`);
+                                                if (isLatestTab1Item) {
+                                                  showToast('success', `เปลี่ยนโต๊ะรายการล่าสุดเป็น ${newDesk} (โทร. ${deskPhone || '-'}) และตั้งเป็นคิวเริ่มต้นสำหรับรอบถัดไปแล้ว`);
+                                                } else {
+                                                  showToast('success', `เปลี่ยนโต๊ะเป็น ${newDesk} (โทร. ${deskPhone || '-'}) เรียบร้อยแล้ว (คิวสแกนถัดไปจะยังคงรันต่อจากรายการล่าสุดบนสุด)`);
+                                                }
                                               } else {
                                                 showToast('success', `เปลี่ยนโต๊ะเป็น ${newDesk} (โทร. ${deskPhone || '-'}) เรียบร้อยแล้ว`);
                                               }
